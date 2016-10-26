@@ -37,6 +37,15 @@ def main():
   args = parser.parse_args()
   train(args)
 
+
+def next_batch(args):
+    t0 = np.random.randn(args.batch_size,1,(2*args.chunk_samples))
+    x = np.sin(2*np.pi*(np.arange(args.seq_length)[np.newaxis,:,np.newaxis]/30.+t0)) + np.random.randn(args.batch_size,args.seq_length,(2*args.chunk_samples))*0.1
+    y = np.sin(2*np.pi*(np.arange(1,args.seq_length+1)[np.newaxis,:,np.newaxis]/30.+t0)) + np.random.randn(args.batch_size,args.seq_length,(2*args.chunk_samples))*0.1
+    y[:,:,args.chunk_samples:] = 0.
+    x[:,:,args.chunk_samples:] = 0.
+    return x,y
+
 def train(args):
     dirname = 'save-vrnn'
     if not os.path.exists(dirname):
@@ -46,10 +55,7 @@ def train(args):
       cPickle.dump(args, f)
 
     model = VRNN(args)
-    # load previously trained model if applicable
     ckpt = tf.train.get_checkpoint_state(dirname)
-    if ckpt:
-      model.load_model(dirname)
 
     with tf.Session() as sess:
         summary_writer = tf.train.SummaryWriter('logs/'+datetime.now().isoformat().replace(':','-'), sess.graph)
@@ -57,28 +63,27 @@ def train(args):
         merged = tf.merge_all_summaries()
         tf.initialize_all_variables().run()
         saver = tf.train.Saver(tf.all_variables())
+        if ckpt:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+            print "Loaded model"
         start = time.time()
         for e in xrange(args.num_epochs):
             sess.run(tf.assign(model.lr, args.learning_rate * (args.decay_rate ** e)))
             state = model.initial_state
             for b in xrange(100):
-                t0 = np.random.randn(args.batch_size,1,(2*args.chunk_samples))
-                x = np.sin(2*np.pi*(np.arange(args.seq_length)[np.newaxis,:,np.newaxis]/30.+t0)) + np.random.randn(args.batch_size,args.seq_length,(2*args.chunk_samples))*0.1
-                y = np.sin(2*np.pi*(np.arange(1,args.seq_length+1)[np.newaxis,:,np.newaxis]/30.+t0)) + np.random.randn(args.batch_size,args.seq_length,(2*args.chunk_samples))*0.1
-                y[:,:,args.chunk_samples:] = 0.
-                x[:,:,args.chunk_samples:] = 0.
+                x,y = next_batch(args)
                 feed = {model.input_data: x, model.target_data: y}
                 train_loss, _, cr, summary, sigma = sess.run([model.cost, model.train_op, check, merged, model.sigma], feed)
                 summary_writer.add_summary(summary, e * 100 + b)
                 if (e * 100 + b) % args.save_every == 0 and ((e * 100 + b) > 0):
-                    checkpoint_path = os.path.join('save', 'model.ckpt')
+                    checkpoint_path = os.path.join(dirname, 'model.ckpt')
                     saver.save(sess, checkpoint_path, global_step = e * 100 + b)
                     print "model saved to {}".format(checkpoint_path)
                 end = time.time()
-                print "{}/{} (epoch {}), train_loss = {:.6f}, time/batch = {:.1f}, std = {:.3f}/{:.3f}" \
+                print "{}/{} (epoch {}), train_loss = {:.6f}, time/batch = {:.1f}, std = {:.3f}" \
                     .format(e * 100 + b,
                             args.num_epochs * 100,
-                            e, args.chunk_samples*train_loss, end - start, (sigma[:,200:]).mean(axis=0).mean(axis=0),(sigma[:,:200]).mean(axis=0).mean(axis=0))
+                            e, args.chunk_samples*train_loss, end - start, sigma.mean(axis=0).mean(axis=0))
                 start = time.time()
 
 if __name__ == '__main__':

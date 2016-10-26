@@ -218,10 +218,3 @@ class VRNN():
             prev_state = next_state
 
         return chunks, mus, sigmas, pis
-
-    def load_model(self, checkpoint_path):
-  
-        ckpt = tf.train.get_checkpoint_state(checkpoint_path)
-        print "loading model: ",ckpt.model_checkpoint_path
-        self.saver.restore(self.sess, ckpt.model_checkpoint_path)
-
