@@ -109,7 +109,7 @@ class VRNN():
             kl_loss = tf_kl_gaussgauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
             likelihood_loss = tf_normal(y, dec_mu, dec_sigma, dec_rho)
 
-            return tf.reduce_mean(kl_loss + likelihood_loss)
+            return tf.reduce_mean(kl_loss + 1024*likelihood_loss)
             #return tf.reduce_mean(likelihood_loss)
 
         self.args = args
@@ -133,9 +133,11 @@ class VRNN():
 
             # Split data because rnn cell needs a list of inputs for the RNN inner loop
             inputs = tf.split(0, args.seq_length, inputs) # n_steps * (batch_size, n_hidden)
-
         flat_target_data = tf.reshape(self.target_data,[-1, 2*args.chunk_samples])
 
+        self.target = flat_target_data
+        self.flat_input = tf.reshape(tf.transpose(tf.pack(inputs),[1,0,2]),[args.batch_size*args.seq_length, -1])
+        self.input = tf.pack(inputs)
         # Get vrnn cell output
         outputs, last_state = tf.nn.rnn(cell, inputs, initial_state=self.initial_state)
         #print outputs
@@ -155,13 +157,16 @@ class VRNN():
 
         lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
         self.sigma = dec_sigma
+        self.mu = dec_mu
         with tf.variable_scope('cost'):
-            self.cost = lossfunc / (args.batch_size * args.seq_length * args.chunk_samples)
+            self.cost = lossfunc 
         tf.scalar_summary('cost', self.cost)
 
 
         self.lr = tf.Variable(0.0, trainable=False)
         tvars = tf.trainable_variables()
+        for t in tvars:
+            print t.name
         grads = tf.gradients(self.cost, tvars)
         #grads = tf.cond(
         #    tf.global_norm(grads) > 1e-20,
