@@ -161,6 +161,8 @@ class VRNN():
         with tf.variable_scope('cost'):
             self.cost = lossfunc 
         tf.scalar_summary('cost', self.cost)
+        tf.scalar_summary('mu', tf.reduce_mean(self.mu))
+        tf.scalar_summary('sigma', tf.reduce_mean(self.sigma))
 
 
         self.lr = tf.Variable(0.0, trainable=False)

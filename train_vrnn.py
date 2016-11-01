@@ -16,14 +16,14 @@ def next_batch(args):
     t0 = np.random.randn(args.batch_size, 1, (2 * args.chunk_samples))
     mixed_noise = np.random.randn(
         args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    x = t0 + mixed_noise + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    y = t0 + mixed_noise + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    #x = np.sin(2 * np.pi * (np.arange(args.seq_length)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
+    #x = t0 + mixed_noise + np.random.randn(
     #    args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    #y = np.sin(2 * np.pi * (np.arange(1, args.seq_length + 1)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
+    #y = t0 + mixed_noise + np.random.randn(
     #    args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
+    x = np.sin(2 * np.pi * (np.arange(args.seq_length)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
+        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
+    y = np.sin(2 * np.pi * (np.arange(1, args.seq_length + 1)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
+        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
     y[:, :, args.chunk_samples:] = 0.
     x[:, :, args.chunk_samples:] = 0.
     return x, y
@@ -74,13 +74,13 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rnn_size', type=int, default=800,
+    parser.add_argument('--rnn_size', type=int, default=3,
                         help='size of RNN hidden state')
-    parser.add_argument('--latent_size', type=int, default=800,
+    parser.add_argument('--latent_size', type=int, default=3,
                         help='size of latent space')
-    parser.add_argument('--batch_size', type=int, default=25,
+    parser.add_argument('--batch_size', type=int, default=3000,
                         help='minibatch size')
-    parser.add_argument('--seq_length', type=int, default=300,
+    parser.add_argument('--seq_length', type=int, default=100,
                         help='RNN sequence length')
     parser.add_argument('--num_epochs', type=int, default=100,
                         help='number of epochs')
@@ -88,13 +88,11 @@ if __name__ == '__main__':
                         help='save frequency')
     parser.add_argument('--grad_clip', type=float, default=10.,
                         help='clip gradients at this value')
-    parser.add_argument('--learning_rate', type=float, default=0.005,
+    parser.add_argument('--learning_rate', type=float, default=0.0005,
                         help='learning rate')
-    parser.add_argument('--decay_rate', type=float, default=0.95,
-                        help='decay rate for rmsprop')
-    parser.add_argument('--chunk_samples', type=int, default=1024,
+    parser.add_argument('--decay_rate', type=float, default=1.,
+                        help='decay of learning rate')
+    parser.add_argument('--chunk_samples', type=int, default=1,
                         help='number of samples per mdct chunk')
-    parser.add_argument('--keep_prob', type=float, default=0.8,
-                        help='dropout keep probability')
     args = parser.parse_args()
     train(args)
