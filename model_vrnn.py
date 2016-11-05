@@ -109,7 +109,7 @@ class VRNN():
             kl_loss = tf_kl_gaussgauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
             likelihood_loss = tf_normal(y, dec_mu, dec_sigma, dec_rho)
 
-            return tf.reduce_mean(kl_loss + 1024*likelihood_loss)
+            return tf.reduce_mean(kl_loss + likelihood_loss)
             #return tf.reduce_mean(likelihood_loss)
 
         self.args = args

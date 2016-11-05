@@ -29,9 +29,10 @@ def next_batch(args):
     #y = t0 + mixed_noise + np.random.randn(
     #    args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
     x = np.sin(2 * np.pi * (np.arange(args.seq_length)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
+        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1 + mixed_noise*0.1
     y = np.sin(2 * np.pi * (np.arange(1, args.seq_length + 1)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
+        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1 + mixed_noise*0.1
+
     y[:, :, args.chunk_samples:] = 0.
     x[:, :, args.chunk_samples:] = 0.
     return x, y
@@ -59,7 +60,7 @@ def train(args, model):
         start = time.time()
         for e in xrange(args.num_epochs):
             sess.run(tf.assign(model.lr, args.learning_rate * (args.decay_rate ** e)))
-            state = model.initial_state
+            state = model.initial_state_c, model.initial_state_h
             for b in xrange(100):
                 x, y = next_batch(args)
                 feed = {model.input_data: x, model.target_data: y}
