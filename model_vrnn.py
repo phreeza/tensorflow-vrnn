@@ -123,7 +123,7 @@ class VRNN():
 
         self.input_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.seq_length, 2*args.chunk_samples], name='input_data')
         self.target_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.seq_length, 2*args.chunk_samples],name = 'target_data')
-        self.initial_state = cell.zero_state(batch_size=args.batch_size, dtype=tf.float32)
+        self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=args.batch_size, dtype=tf.float32)
 
 
         # input shape: (batch_size, n_steps, n_input)
@@ -139,7 +139,7 @@ class VRNN():
         self.flat_input = tf.reshape(tf.transpose(tf.pack(inputs),[1,0,2]),[args.batch_size*args.seq_length, -1])
         self.input = tf.pack(inputs)
         # Get vrnn cell output
-        outputs, last_state = tf.nn.rnn(cell, inputs, initial_state=self.initial_state)
+        outputs, last_state = tf.nn.rnn(cell, inputs, initial_state=(self.initial_state_c,self.initial_state_h))
         #print outputs
         #outputs = map(tf.pack,zip(*outputs))
         outputs_reshape = []
@@ -152,8 +152,10 @@ class VRNN():
                 outputs_reshape.append(x)
 
         enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma = outputs_reshape
-        self.final_state = last_state
-        # reshape target data so that it is compatible with prediction shape
+        self.final_state_c,self.final_state_h = last_state
+        self.mu = dec_mu
+        self.sigma = dec_sigma
+        self.rho = dec_rho
 
         lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
         self.sigma = dec_sigma
@@ -181,47 +183,47 @@ class VRNN():
     def sample(self, sess, args, num=4410, start=None):
 
         def sample_gaussian(mu, sigma):
-            return mu + (np.sqrt(sigma)*np.random.randn(*sigma.shape))
+            return mu + (sigma*np.random.randn(*sigma.shape))
 
         if start is None:
             prev_x = np.random.randn(1, 1, 2*args.chunk_samples)
         elif len(start.shape) == 1:
             prev_x = start[np.newaxis,np.newaxis,:]
-        prev_state = sess.run(self.cell.zero_state(1, tf.float32))
-
-        chunks = np.zeros((num, 2*args.chunk_samples), dtype=np.float32)
-
-        if len(start.shape) == 2:
+        elif len(start.shape) == 2:
             for i in range(start.shape[0]-1):
                 prev_x = start[i,:]
                 prev_x = prev_x[np.newaxis,np.newaxis,:]
-                feed = {self.input_data: prev_x, self.initial_state:prev_state}
-                [o_pi, o_mu, o_sigma, o_rho, prev_state] = sess.run([self.pi, self.mu, self.sigma, self.rho, self.final_state],feed)
+                feed = {self.input_data: prev_x,
+                        self.initial_state_c:prev_state[0],
+                        self.initial_state_h:prev_state[1]}
+                
+                [o_mu, o_sigma, o_rho, prev_state_c, prev_state_h] = sess.run(
+                        [self.mu, self.sigma, self.rho,
+                         self.final_state_c,self.final_state_h],feed)
+
             prev_x = start[-1,:]
             prev_x = prev_x[np.newaxis,np.newaxis,:]
 
+        prev_state = sess.run(self.cell.zero_state(1, tf.float32))
+        chunks = np.zeros((num, 2*args.chunk_samples), dtype=np.float32)
+        mus = np.zeros((num, args.chunk_samples), dtype=np.float32)
+        sigmas = np.zeros((num, args.chunk_samples), dtype=np.float32)
+
         for i in xrange(num):
-            feed = {self.input_data: prev_x, self.initial_state:prev_state}
-            [o_pi, o_mu, o_sigma, o_rho, next_state] = sess.run([self.pi, self.mu, self.sigma, self.rho, self.final_state],feed)
-            p = o_pi[0]
-            #idx = np.argmax(p)
-            if i%100 ==0:
-                print np.argsort(p)
-            if p.max() > 0.001:
-                p[p<0.001] = 0.0
-                p = p/p.sum()
-            else:
-                print p.max()
-            p = (p-p.min())
-            next_x = np.hstack((sample_gaussian(o_mu[:,:,idx], o_sigma[:,:,idx]),
-                                2.*(o_rho[:,:,idx] > np.random.random(o_rho.shape[:2]))-1.))
+            feed = {self.input_data: prev_x,
+                    self.initial_state_c:prev_state[0],
+                    self.initial_state_h:prev_state[1]}
+            [o_mu, o_sigma, o_rho, next_state_c, next_state_h] = sess.run([self.mu, self.sigma,
+                self.rho, self.final_state_c, self.final_state_h],feed)
+
+            next_x = np.hstack((sample_gaussian(o_mu, o_sigma),
+                                2.*(o_rho > np.random.random(o_rho.shape[:2]))-1.))
             chunks[i] = next_x
-            mus[i] = o_mu[:,:,idx]
-            sigmas[i] = o_sigma[:,:,idx]
-            pis[i] = p
+            mus[i] = o_mu
+            sigmas[i] = o_sigma
 
             prev_x = np.zeros((1, 1, 2*args.chunk_samples), dtype=np.float32)
             prev_x[0][0] = next_x
-            prev_state = next_state
+            prev_state = next_state_c, next_state_h
 
-        return chunks, mus, sigmas, pis
+        return chunks, mus, sigmas

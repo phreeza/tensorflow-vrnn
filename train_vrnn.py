@@ -12,6 +12,14 @@ from model_vrnn import VRNN
 
 from matplotlib import pyplot as plt
 
+'''
+TODOS:
+    - parameters for depth and width of hidden layers
+    - implement predict and sample functions
+    - separate binary and gaussian variables
+    - clean up nomenclature to remove MDCT references
+'''
+
 def next_batch(args):
     t0 = np.random.randn(args.batch_size, 1, (2 * args.chunk_samples))
     mixed_noise = np.random.randn(
@@ -29,7 +37,7 @@ def next_batch(args):
     return x, y
 
 
-def train(args):
+def train(args, model):
     dirname = 'save-vrnn'
     if not os.path.exists(dirname):
         os.makedirs(dirname)
@@ -37,7 +45,6 @@ def train(args):
     with open(os.path.join(dirname, 'config.pkl'), 'w') as f:
         cPickle.dump(args, f)
 
-    model = VRNN(args)
     ckpt = tf.train.get_checkpoint_state(dirname)
 
     with tf.Session() as sess:
@@ -95,4 +102,7 @@ if __name__ == '__main__':
     parser.add_argument('--chunk_samples', type=int, default=1,
                         help='number of samples per mdct chunk')
     args = parser.parse_args()
-    train(args)
+
+    model = VRNN(args)
+
+    train(args, model)
