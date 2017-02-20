@@ -1,12 +1,17 @@
 import tensorflow as tf
 import numpy as np
 
+#Todos:
+# - Add batch normalization
+# - Add KL term annealing
+# - try fixed variance/vanilla least squares in output layer
+
 def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=False):
     shape = input_.get_shape().as_list()
 
     with tf.variable_scope(scope or "Linear"):
         matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,
-                                 tf.random_normal_initializer(stddev=stddev))
+                                 tf.contrib.layers.xavier_initializer())
         bias = tf.get_variable("bias", [output_size],
             initializer=tf.constant_initializer(bias_start))
         if with_w:
@@ -23,9 +28,12 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
         self.n_z = z_dim
         self.n_x_1 = x_dim
         self.n_z_1 = z_dim
-        self.n_enc_hidden = z_dim
-        self.n_dec_hidden = x_dim
-        self.n_prior_hidden = z_dim
+        self.n_enc_hidden = 2*z_dim
+        self.n_dec_hidden = 2*x_dim
+        self.n_prior_hidden = 2*z_dim
+        self.layers_enc_hidden = 5
+        self.layers_dec_hidden = 5
+        self.layers_prior_hidden = 5
         self.lstm = tf.nn.rnn_cell.LSTMCell(self.n_h, state_is_tuple=True)
 
 
@@ -43,7 +51,11 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
 
             with tf.variable_scope("Prior"):
                 with tf.variable_scope("hidden"):
-                    prior_hidden = tf.nn.relu(linear(h, self.n_prior_hidden))
+                    prev = h
+                    for n in range(self.layers_prior_hidden):
+                        with tf.variable_scope("Layer_"+str(n+1)):
+                            prev = tf.nn.relu(linear(prev, self.n_prior_hidden))
+                    prior_hidden = prev
                 with tf.variable_scope("mu"):
                     prior_mu = linear(prior_hidden, self.n_z)
                 with tf.variable_scope("sigma"):
@@ -54,7 +66,11 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
 
             with tf.variable_scope("Encoder"):
                 with tf.variable_scope("hidden"):
-                    enc_hidden = tf.nn.relu(linear(tf.concat(1,(x_1, h)), self.n_enc_hidden))
+                    prev = tf.concat(1,(x_1, h))
+                    for n in range(self.layers_enc_hidden):
+                        with tf.variable_scope("Layer_"+str(n+1)):
+                            prev = tf.nn.relu(linear(prev, self.n_enc_hidden))
+                    enc_hidden = prev
                 with tf.variable_scope("mu"):
                     enc_mu    = linear(enc_hidden, self.n_z)
                 with tf.variable_scope("sigma"):
@@ -67,7 +83,11 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
 
             with tf.variable_scope("Decoder"):
                 with tf.variable_scope("hidden"):
-                    dec_hidden = tf.nn.relu(linear(tf.concat(1,(z_1, h)), self.n_dec_hidden))
+                    prev = tf.concat(1,(z_1, h))
+                    for n in range(self.layers_dec_hidden):
+                        with tf.variable_scope("Layer_"+str(n+1)):
+                            prev = tf.nn.relu(linear(prev, self.n_dec_hidden))
+                    dec_hidden = prev
                 with tf.variable_scope("mu"):
                     dec_mu = linear(dec_hidden, self.n_x)
                 with tf.variable_scope("sigma"):
@@ -90,18 +110,19 @@ class VRNN():
                 ss = tf.maximum(1e-10,tf.square(s))
                 norm = tf.sub(y[:,:args.chunk_samples], mu)
                 z = tf.div(tf.square(norm), ss)
-                denom_log = tf.log(2*np.pi*ss, name='denom_log')
-                result = tf.reduce_sum(z+denom_log, 1)/2# -
-                                       #(tf.log(tf.maximum(1e-20,rho),name='log_rho')*(1+y[:,args.chunk_samples:])
-                                       # +tf.log(tf.maximum(1e-20,1-rho),name='log_rho_inv')*(1-y[:,args.chunk_samples:]))/2, 1)
+                signal_sign = y[:,args.chunk_samples:]
+                denom_log = tf.log(2.*np.pi*ss, name='denom_log')
+                result = tf.reduce_sum((z+denom_log)/2. -
+                                       (tf.log(tf.maximum(1e-20,rho),name='log_rho')*(1.+signal_sign)
+                                        +tf.log(tf.maximum(1e-20,1.-rho),name='log_rho_inv')*(1.-signal_sign))/2., 1)
 
             return result
 
         def tf_kl_gaussgauss(mu_1, sigma_1, mu_2, sigma_2):
             with tf.variable_scope("kl_gaussgauss"):
                 return tf.reduce_sum(0.5 * (
-                    2 * tf.log(tf.maximum(1e-9,sigma_2),name='log_sigma_2') 
-                  - 2 * tf.log(tf.maximum(1e-9,sigma_1),name='log_sigma_1')
+                    2. * tf.log(tf.maximum(1e-9,sigma_2),name='log_sigma_2') 
+                  - 2. * tf.log(tf.maximum(1e-9,sigma_1),name='log_sigma_1')
                   + (tf.square(sigma_1) + tf.square(mu_1 - mu_2)) / tf.maximum(1e-9,(tf.square(sigma_2))) - 1
                 ), 1)
 
@@ -109,7 +130,7 @@ class VRNN():
             kl_loss = tf_kl_gaussgauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
             likelihood_loss = tf_normal(y, dec_mu, dec_sigma, dec_rho)
 
-            return tf.reduce_mean(kl_loss + likelihood_loss)
+            return tf.reduce_mean(kl_loss + likelihood_loss), tf.reduce_mean(kl_loss), tf.reduce_mean(likelihood_loss)
             #return tf.reduce_mean(likelihood_loss)
 
         self.args = args
@@ -157,14 +178,22 @@ class VRNN():
         self.sigma = dec_sigma
         self.rho = dec_rho
 
-        lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
-        self.sigma = dec_sigma
-        self.mu = dec_mu
+        lossfunc, kl_loss, likelihood_loss = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma, flat_target_data)
         with tf.variable_scope('cost'):
             self.cost = lossfunc 
+            self.kl_loss = kl_loss
+            self.likelihood_loss = likelihood_loss
+        with tf.variable_scope('avg_stats'):
+            self.mu_avg = tf.reduce_mean(dec_mu,name='mu_avg')
+            self.sigma_avg = tf.reduce_sum(dec_sigma,name='sigma_avg')/(args.batch_size*args.seq_length*args.chunk_samples)
+            self.rho_avg = tf.reduce_mean(dec_rho,name='rho_avg')
+
         tf.scalar_summary('cost', self.cost)
-        tf.scalar_summary('mu', tf.reduce_mean(self.mu))
-        tf.scalar_summary('sigma', tf.reduce_mean(self.sigma))
+        tf.scalar_summary('kl_loss', self.kl_loss)
+        tf.scalar_summary('likelihood_loss', self.likelihood_loss)
+        tf.scalar_summary('mu', self.mu_avg)
+        tf.scalar_summary('sigma', self.sigma_avg)
+        tf.scalar_summary('rho', self.rho_avg)
 
 
         self.lr = tf.Variable(0.0, trainable=False)
@@ -180,10 +209,12 @@ class VRNN():
         self.train_op = optimizer.apply_gradients(zip(grads, tvars))
         #self.saver = tf.train.Saver(tf.all_variables())
 
-    def sample(self, sess, args, num=4410, start=None):
+    def sample(self, sess, args, num=4410, start=None, T=1.):
 
         def sample_gaussian(mu, sigma):
             return mu + (sigma*np.random.randn(*sigma.shape))
+
+        prev_state = sess.run(self.cell.zero_state(1, tf.float32))
 
         if start is None:
             prev_x = np.random.randn(1, 1, 2*args.chunk_samples)
@@ -201,13 +232,15 @@ class VRNN():
                         [self.mu, self.sigma, self.rho,
                          self.final_state_c,self.final_state_h],feed)
 
+                prev_state = prev_state_c, prev_state_h
+
             prev_x = start[-1,:]
             prev_x = prev_x[np.newaxis,np.newaxis,:]
 
-        prev_state = sess.run(self.cell.zero_state(1, tf.float32))
         chunks = np.zeros((num, 2*args.chunk_samples), dtype=np.float32)
         mus = np.zeros((num, args.chunk_samples), dtype=np.float32)
         sigmas = np.zeros((num, args.chunk_samples), dtype=np.float32)
+        rhos = np.zeros((num, args.chunk_samples), dtype=np.float32)
 
         for i in xrange(num):
             feed = {self.input_data: prev_x,
@@ -216,14 +249,15 @@ class VRNN():
             [o_mu, o_sigma, o_rho, next_state_c, next_state_h] = sess.run([self.mu, self.sigma,
                 self.rho, self.final_state_c, self.final_state_h],feed)
 
-            next_x = np.hstack((sample_gaussian(o_mu, o_sigma),
+            next_x = np.hstack((sample_gaussian(o_mu, o_sigma*T),
                                 2.*(o_rho > np.random.random(o_rho.shape[:2]))-1.))
             chunks[i] = next_x
             mus[i] = o_mu
             sigmas[i] = o_sigma
+            rhos[i] = o_rho
 
             prev_x = np.zeros((1, 1, 2*args.chunk_samples), dtype=np.float32)
             prev_x[0][0] = next_x
             prev_state = next_state_c, next_state_h
 
-        return chunks, mus, sigmas
+        return chunks, mus, sigmas, rhos
