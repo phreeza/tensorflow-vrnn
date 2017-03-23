@@ -14,7 +14,7 @@ def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=
         else:
             return tf.matmul(input_, matrix) + bias
 
-class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
+class VartiationalRNNCell(tf.contrib.rnn.RNNCell):
     """Variational RNN cell."""
 
     def __init__(self, x_dim, h_dim, z_dim = 100):
@@ -26,7 +26,7 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
         self.n_enc_hidden = z_dim
         self.n_dec_hidden = x_dim
         self.n_prior_hidden = z_dim
-        self.lstm = tf.nn.rnn_cell.LSTMCell(self.n_h, state_is_tuple=True)
+        self.lstm = tf.contrib.rnn.LSTMCell(self.n_h, state_is_tuple=True)
 
 
     @property
