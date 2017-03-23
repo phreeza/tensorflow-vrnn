@@ -14,7 +14,7 @@ def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=
         else:
             return tf.matmul(input_, matrix) + bias
 
-class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
+class VartiationalRNNCell(tf.contrib.rnn.RNNCell):
     """Variational RNN cell."""
 
     def __init__(self, x_dim, h_dim, z_dim = 100):
@@ -26,7 +26,7 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
         self.n_enc_hidden = z_dim
         self.n_dec_hidden = x_dim
         self.n_prior_hidden = z_dim
-        self.lstm = tf.nn.rnn_cell.LSTMCell(self.n_h, state_is_tuple=True)
+        self.lstm = tf.contrib.rnn.LSTMCell(self.n_h, state_is_tuple=True)
 
 
     @property
@@ -54,20 +54,20 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
 
             with tf.variable_scope("Encoder"):
                 with tf.variable_scope("hidden"):
-                    enc_hidden = tf.nn.relu(linear(tf.concat(1,(x_1, h)), self.n_enc_hidden))
+                    enc_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(x_1, h)), self.n_enc_hidden))
                 with tf.variable_scope("mu"):
                     enc_mu    = linear(enc_hidden, self.n_z)
                 with tf.variable_scope("sigma"):
                     enc_sigma = tf.nn.softplus(linear(enc_hidden, self.n_z))
             eps = tf.random_normal((x.get_shape().as_list()[0], self.n_z), 0.0, 1.0, dtype=tf.float32)
             # z = mu + sigma*epsilon
-            z = tf.add(enc_mu, tf.mul(enc_sigma, eps))
+            z = tf.add(enc_mu, tf.multiply(enc_sigma, eps))
             with tf.variable_scope("phi_z"):
                 z_1 = tf.nn.relu(linear(z, self.n_z_1))
 
             with tf.variable_scope("Decoder"):
                 with tf.variable_scope("hidden"):
-                    dec_hidden = tf.nn.relu(linear(tf.concat(1,(z_1, h)), self.n_dec_hidden))
+                    dec_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(z_1, h)), self.n_dec_hidden))
                 with tf.variable_scope("mu"):
                     dec_mu = linear(dec_hidden, self.n_x)
                 with tf.variable_scope("sigma"):
@@ -76,7 +76,7 @@ class VartiationalRNNCell(tf.nn.rnn_cell.RNNCell):
                     dec_rho = tf.nn.sigmoid(linear(dec_hidden, self.n_x))
 
 
-            output, state2 = self.lstm(tf.concat(1,(x_1, z_1)), state)
+            output, state2 = self.lstm(tf.concat(axis=1,values=(x_1, z_1)), state)
         return (enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma), state2
 
 
@@ -88,7 +88,7 @@ class VRNN():
         def tf_normal(y, mu, s, rho):
             with tf.variable_scope('normal'):
                 ss = tf.maximum(1e-10,tf.square(s))
-                norm = tf.sub(y[:,:args.chunk_samples], mu)
+                norm = tf.subtract(y[:,:args.chunk_samples], mu)
                 z = tf.div(tf.square(norm), ss)
                 denom_log = tf.log(2*np.pi*ss, name='denom_log')
                 result = tf.reduce_sum(z+denom_log, 1)/2# -
@@ -132,21 +132,21 @@ class VRNN():
             inputs = tf.reshape(inputs, [-1, 2*args.chunk_samples]) # (n_steps*batch_size, n_input)
 
             # Split data because rnn cell needs a list of inputs for the RNN inner loop
-            inputs = tf.split(0, args.seq_length, inputs) # n_steps * (batch_size, n_hidden)
+            inputs = tf.split(axis=0, num_or_size_splits=args.seq_length, value=inputs) # n_steps * (batch_size, n_hidden)
         flat_target_data = tf.reshape(self.target_data,[-1, 2*args.chunk_samples])
 
         self.target = flat_target_data
-        self.flat_input = tf.reshape(tf.transpose(tf.pack(inputs),[1,0,2]),[args.batch_size*args.seq_length, -1])
-        self.input = tf.pack(inputs)
+        self.flat_input = tf.reshape(tf.transpose(tf.stack(inputs),[1,0,2]),[args.batch_size*args.seq_length, -1])
+        self.input = tf.stack(inputs)
         # Get vrnn cell output
-        outputs, last_state = tf.nn.rnn(cell, inputs, initial_state=(self.initial_state_c,self.initial_state_h))
+        outputs, last_state = tf.contrib.rnn.static_rnn(cell, inputs, initial_state=(self.initial_state_c,self.initial_state_h))
         #print outputs
         #outputs = map(tf.pack,zip(*outputs))
         outputs_reshape = []
         names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "dec_rho", "prior_mu", "prior_sigma"]
         for n,name in enumerate(names):
             with tf.variable_scope(name):
-                x = tf.pack([o[n] for o in outputs])
+                x = tf.stack([o[n] for o in outputs])
                 x = tf.transpose(x,[1,0,2])
                 x = tf.reshape(x,[args.batch_size*args.seq_length, -1])
                 outputs_reshape.append(x)
@@ -162,9 +162,9 @@ class VRNN():
         self.mu = dec_mu
         with tf.variable_scope('cost'):
             self.cost = lossfunc 
-        tf.scalar_summary('cost', self.cost)
-        tf.scalar_summary('mu', tf.reduce_mean(self.mu))
-        tf.scalar_summary('sigma', tf.reduce_mean(self.sigma))
+        tf.summary.scalar('cost', self.cost)
+        tf.summary.scalar('mu', tf.reduce_mean(self.mu))
+        tf.summary.scalar('sigma', tf.reduce_mean(self.sigma))
 
 
         self.lr = tf.Variable(0.0, trainable=False)

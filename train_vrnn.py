@@ -50,11 +50,11 @@ def train(args, model):
     ckpt = tf.train.get_checkpoint_state(dirname)
     n_batches = 100
     with tf.Session() as sess:
-        summary_writer = tf.train.SummaryWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
+        summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
         check = tf.add_check_numerics_ops()
-        merged = tf.merge_all_summaries()
-        tf.initialize_all_variables().run()
-        saver = tf.train.Saver(tf.all_variables())
+        merged = tf.summary.merge_all()
+        tf.global_variables_initializer().run()
+        saver = tf.train.Saver(tf.global_variables())
         if ckpt:
             saver.restore(sess, ckpt.model_checkpoint_path)
             print "Loaded model"
