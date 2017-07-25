@@ -40,7 +40,7 @@ def train(args, model):
 
     ckpt = tf.train.get_checkpoint_state(SAVE_DIR)
     n_batches = 100
-    with tf.Session() as sess:0
+    with tf.Session() as sess:
         merged = tf.summary.merge_all()
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver(tf.global_variables())
