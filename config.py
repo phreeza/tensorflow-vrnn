@@ -12,7 +12,7 @@ class VRNNConfig(object):
         self.seq_length = 100 # RNN sequence length
         self.chunk_samples = 1 # number of samples per mdct chunk
 
-        self.num_epochs = 1
+        self.num_epochs = 5
         self.batch_size = 3000
         self.n_batches = 100
         self.log_every = 20

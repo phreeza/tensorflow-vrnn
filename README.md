@@ -5,21 +5,26 @@ A variational recurrent neural network as described in:
 
 ## Requirements
 python == 3.5
-tensorflow == 1.2.1L
+tensorflow == 1.2.1
+numpy==1.13.1
 
-## train.py
+## main.py
 * train this model
-
-## model.py
-* **VRNN** structure
+```python
+python main.py
+```
+## cell.py
+* **VRNNCell** structure
 
 ## utils.py
 * Basic functions implementation
 
+## ops.py
+* Basic operations based on tensorflow
+
 ## config.py
-* Basic configuration of model 
-
-
+* Basic configuration of model
+* Every configuration can be changed here.
 ![VRNN Structure](graph1.png?raw=true "VRNN Structure")
 
 ![Global Structure](graph2.png?raw=true "Global Structure")
