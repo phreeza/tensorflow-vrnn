@@ -54,7 +54,7 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
             z_1 = fc_layer(z, self.n_z_1, activation = tf.nn.relu, scope = "phi_z")
 
             with tf.variable_scope("Decoder"):
-                dec_hidden = fc_layer(tf.concat(values=(z1, h), axis=1), self.n_dec_hidden, activation = tf.nn.relu, scope = "hidden")
+                dec_hidden = fc_layer(tf.concat(values=(z_1, h), axis=1), self.n_dec_hidden, activation = tf.nn.relu, scope = "hidden")
                 dec_mu = fc_layer(dec_hidden, self.n_x, scope = "mu")
                 dec_sigma = fc_layer(dec_hidden, self.n_x, scope = "sigma")
 

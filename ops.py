@@ -1,13 +1,13 @@
 import tensorflow as tf
 
-def print_vars(string):
-    '''print variables in collection named string'''
-    print("Collection name %s"%string)
-    print([v.name for v in tf.get_collection(string)])
-
 def get_shape(tensor):
     '''return the shape of tensor as list'''
     return tensor.get_shape().as_list()
+
+def print_vars(string):
+    '''print variables in collection named string'''
+    print("Collection name %s"%string)
+    print("    "+"\n    ".join(["{} : {}".format(v.name, get_shape(v)) for v in tf.get_collection(string)]))
 
 def fc_layer(input_, output_size, activation = None, batch_norm = False, istrain = False, scope = None):
     '''

@@ -19,4 +19,4 @@ class VRNNConfig(object):
 
         self.grad_clip = 10 # clip gradients at this value
         self.decay_rate = 1.
-        self.learning_rate = 0.0005
+        self.lr = 0.0005 # initial learning_rate

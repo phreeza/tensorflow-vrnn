@@ -1,6 +1,7 @@
 from utils import create_dir, pickle_save
 from config import SAVE_DIR, VRNNConfig
 from datetime import datetime
+from ops import print_vars
 from model import VRNNCell
 
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ logger.setLevel(logging.DEBUG)
 class VRNN(VRNNConfig):
     def __init__(self, istest=False):
         VRNNConfig.__init__(self)
-
+        logger.info("Building model starts...")
         def NLL(y, mu, sigma):
             '''Negative LogLiklihood
             - log(1/sqrt(2*pi)e-(y-mu)^2/2/sigma^2)
@@ -25,9 +26,9 @@ class VRNN(VRNNConfig):
             '''
             with tf.variable_scope('NLL'):
                 sigma_square = tf.maximum(1e-10, tf.square(sigma)) # sigma^2, avoid to be zero
-                norm = tf.subtract(y[:,:args.chunk_samples], mu) # x-\mu
+                norm = tf.subtract(y[:,:self.chunk_samples], mu) # x-\mu
                 z = tf.div(tf.square(norm), sigma_square) # (x-\mu)^2/sigma^2
-                denom_log = tf.log(2*np.pi*ss)
+                denom_log = tf.log(2*np.pi*sigma_square)
             return 0.5*tf.reduce_sum(z+denom_log, 1)
 
         def kl_gaussian(mu_1, sigma_1, mu_2, sigma_2):
@@ -48,11 +49,10 @@ class VRNN(VRNNConfig):
         if istest:
             self.batch_size = 1
             self.seq_length = 1
-
-        cell = VRNNCell(self.chunk_samples, self.rnn_size, self.latent_size)
-
-        self.cell = cell
-
+        logger.info("Building VRNNCell starts...")
+        self.cell = VRNNCell(self.chunk_samples, self.rnn_size, self.latent_size)
+        logger.info("Building VRNNCell done.")
+        
         # [batch_size, seq_length, chunk_samples*2]
         self.input_data = tf.placeholder(dtype=tf.float32, shape=[self.batch_size, self.seq_length, 2*self.chunk_samples], name='input_data')
         # [batch_size, seq_length, chunk_samples*2]
@@ -68,7 +68,7 @@ class VRNN(VRNNConfig):
         # [batch_size* seq_length, chunk_samples*2]
         self.target = tf.reshape(self.target_data, [-1, 2*self.chunk_samples])
 
-        outputs, last_state = tf.contrib.rnn.static_rnn(cell, inputs, initial_state=(self.initial_state_c, self.initial_state_h))
+        outputs, last_state = tf.contrib.rnn.static_rnn(self.cell, inputs, initial_state=(self.initial_state_c, self.initial_state_h))
 
         outputs_reshape = []
         names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "prior_mu", "prior_sigma"]
@@ -84,13 +84,17 @@ class VRNN(VRNNConfig):
         self.mu = dec_mu
         self.sigma = dec_sigma
 
-        self.cost = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
+        self.cost = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, prior_mu, prior_sigma, self.target)
         self.sigma = dec_sigma
         self.mu = dec_mu
 
         print_vars("trainable_variables")
-        self.train_op = tf.train.AdamOptimizer().minimize(self.cost)
-        sess = tf.Session()
+        self.lr = tf.Variable(self.lr, trainable = False)
+        self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
+        
+        logger.info("Building model done.")
+
+        self.sess = tf.Session()
 
     def next_batch(self):
         '''
@@ -111,20 +115,16 @@ class VRNN(VRNNConfig):
         t_offset = np.random.randn(self.batch_size, 1, (2 * self.chunk_samples))
         mixed_noise = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.01
 
-        x = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1
-            + mixed_noise
-            + np.sin(2 * np.pi * (np.arange(self.seq_length)[np.newaxis, :, np.newaxis] / 10. + t_offset))
+        x = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1 + mixed_noise + np.sin(2 * np.pi * (np.arange(self.seq_length)[np.newaxis, :, np.newaxis] / 10. + t_offset))
 
-        y = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1
-            + mixed_noise
-            + np.sin(2 * np.pi * (np.arange(1, self.seq_length+1)[np.newaxis, :, np.newaxis] / 10. + t_offset))
+        y = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1 + mixed_noise + np.sin(2 * np.pi * (np.arange(1, self.seq_length+1)[np.newaxis, :, np.newaxis] / 10. + t_offset))
 
         y[:, :, self.chunk_samples:] = 0.
         x[:, :, self.chunk_samples:] = 0.
-
         return x, y
 
     def initialize(self):
+        logger.info("Initialization of parameters")
         self.sess.run(tf.global_variables_initializer())
 
     def restore(self):
@@ -142,20 +142,24 @@ class VRNN(VRNNConfig):
             saver.restore(self.sess, ckpt.model_checkpoint_path)
             print("Loaded model")
 
+        iteration = 0
         for epoch in range(self.num_epochs):
             # Learning rate decay
-            sess.run(tf.assign(model.lr, self.learning_rate * (self.decay_rate ** epoch)))
+            self.sess.run(tf.assign(self.lr, self.lr * (self.decay_rate ** epoch)))
 
-            for b in range(self.n_batches):
-                x, y = next_batch(args)
+            for batch in range(self.n_batches):
+                x, y = self.next_batch()
                 feed_dict = {model.input_data: x, model.target_data: y}
-                train_loss, _, cr, sigma= sess.run([model.cost, model.train_op, check, model.sigma], feed_dict = feed_dict)
+                train_loss, _, sigma= self.sess.run([self.cost, self.train_op, self.sigma], feed_dict = feed_dict)
 
-                if (e * self.n_batches + b) % args.save_every == 0 and ((e * n_batches + b) > 0):
+                iteration+=1
+                print("{}/{}(epoch {}), train_loss = {:.6f}, std = {:.3f}".format(iteration, self.num_epochs * self.n_batches, epoch, self.chunk_samples * train_loss, sigma.mean(axis=0).mean(axis=0)))
+                
+                if iteration % self.save_every == 0 and iteration > 0:
                     checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                    saver.save(sess, checkpoint_path, global_step=e * self.n_batches + b)
-                    print("model saved to {}".format(checkpoint_path))
-                print("{}/{}(epoch {}), train_loss = {:.6f}, std = {:.3f}".format(e * self.n_batches + b, args.num_epochs * n_batches, e, self.chunk_samples * train_loss, sigma.mean(axis=0).mean(axis=0)))
+                    saver.save(self.sess, checkpoint_path, global_step=iteration)
+                    logger.info("model saved to {}".format(checkpoint_path))
+
 
     def sample(self, num=4410, start=None):
         def sample_gaussian(mu, sigma):
@@ -173,7 +177,7 @@ class VRNN(VRNNConfig):
                         self.initial_state_c:prev_state[0],
                         self.initial_state_h:prev_state[1]}
 
-                [o_mu, o_sigma, o_rho, prev_state_c, prev_state_h] = sess.run(
+                [o_mu, o_sigma, o_rho, prev_state_c, prev_state_h] = self.sess.run(
                         [self.mu, self.sigma, self.rho,self.final_state_c,self.final_state_h],
                         feed_dict=feed_dict)
 
@@ -189,7 +193,7 @@ class VRNN(VRNNConfig):
             feed_dict = {self.input_data: prev_x,
                     self.initial_state_c:prev_state[0],
                     self.initial_state_h:prev_state[1]}
-            [o_mu, o_sigma, next_state_c, next_state_h] = sess.run(
+            [o_mu, o_sigma, next_state_c, next_state_h] = self.sess.run(
                 [self.mu, self.sigma, self.final_state_c, self.final_state_h],
                 feed_dict = feed_dict)
 
