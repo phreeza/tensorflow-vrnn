@@ -156,6 +156,12 @@ class VRNN(VRNNConfig):
     def initialize(self):
         self.sess.run(tf.global_variables_initializer())
 
+    def restore(self):
+        saver = tf.train.Saver(tf.global_variables())
+        ckpt = tf.train.get_checkpoint_state(SAVE_DIR)
+        print("loading model: ", ckpt.model_checkpoint_path)
+        saver.restore(self.sess, ckpt.model_checkpoint_path)
+
     def train(self):
         self.n_batches = 100
         ckpt = tf.train.get_checkpoint_state(SAVE_DIR)
@@ -184,3 +190,6 @@ if __name__ == '__main__':
     model = VRNN()
     model.initialize()
     model.train()
+    #model = VRNN(True)
+    #model.restore()
+    #sample_data,mus,sigmas = model.sample()
