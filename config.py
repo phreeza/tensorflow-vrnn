@@ -10,7 +10,7 @@ class VRNNConfig(object):
         self.latent_size = 3 # size of latent space
 
         self.seq_length = 100 # RNN sequence length
-        self.chunk_samples = 1 # number of sample os per mdct chunk
+        self.chunk_samples = 1 # number of samples per mdct chunk
 
         self.num_epochs = 100
         self.batch_size = 3000

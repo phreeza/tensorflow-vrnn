@@ -35,7 +35,6 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
     	'''
         with tf.variable_scope(scope or type(self).__name__):
             h, c = state
-
             with tf.variable_scope("Prior"):
                 prior_hidden = fc_layer(h, self.n_prior_hidden, activation = tf.nn.relu, scope = "hidden")
                 prior_mu = fc_layer(prior_hidden, self.n_z, scope = "mu")
@@ -60,4 +59,5 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
                 dec_sigma = fc_layer(dec_hidden, self.n_x, scope = "sigma")
 
             output, next_state = self.lstm(tf.concat(values=(x_1, z_1), axis=1), state)
+
         return (enc_mu, enc_sigma, dec_mu, dec_sigma, prior_mu, prior_sigma), next_state
