@@ -6,6 +6,12 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
     """Variational RNN cell."""
 
     def __init__(self, x_dim, h_dim, z_dim = 100):
+        '''
+        Args:
+            x_dim - chunk_samples
+            h_dim - rnn_size
+            z_dim - latent_size
+        '''
         self.n_h = h_dim
         self.n_x = x_dim
         self.n_z = z_dim
@@ -27,7 +33,7 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
     def __call__(self, x, state, scope=None):
         '''
 		Args:
-			x - input 2D tensor
+			x - input 2D tensor [batch_size x 2*self.chunk_samples]
 			state - tuple
 				(hidden, cell_state)
 			scope - string
@@ -45,7 +51,7 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
             with tf.variable_scope("Encoder"):
                 enc_hidden = fc_layer(tf.concat(values=(x_1, h), axis=1), self.n_enc_hidden, activation = tf.nn.relu, scope = "hidden")
                 enc_mu = fc_layer(enc_hidden, self.n_z, scope = 'mu')
-                enc_sigma = fc_layer(enc_hidden, self.n_z, activation = tf.nn.softplus, scope = 'sigma') 
+                enc_sigma = fc_layer(enc_hidden, self.n_z, activation = tf.nn.softplus, scope = 'sigma')
 
             # Random sampling ~ N(0, 1)
             eps = tf.random_normal((get_shape(x)[0], self.n_z), 0.0, 1.0, dtype=tf.float32)
@@ -56,7 +62,7 @@ class VRNNCell(tf.nn.rnn_cell.RNNCell):
             with tf.variable_scope("Decoder"):
                 dec_hidden = fc_layer(tf.concat(values=(z_1, h), axis=1), self.n_dec_hidden, activation = tf.nn.relu, scope = "hidden")
                 dec_mu = fc_layer(dec_hidden, self.n_x, scope = "mu")
-                dec_sigma = fc_layer(dec_hidden, self.n_x, scope = "sigma")
+                dec_sigma = fc_layer(dec_hidden, self.n_x, activation = tf.nn.softplus, scope = "sigma")
 
             output, next_state = self.lstm(tf.concat(values=(x_1, z_1), axis=1), state)
 

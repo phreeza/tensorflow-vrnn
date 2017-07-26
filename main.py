@@ -2,9 +2,8 @@ from utils import create_dir, pickle_save
 from config import SAVE_DIR, VRNNConfig
 from datetime import datetime
 from ops import print_vars
-from model import VRNNCell
+from cell import VRNNCell
 
-import matplotlib.pyplot as plt
 import tensorflow as tf
 import numpy as np
 import logging
@@ -23,6 +22,12 @@ class VRNN(VRNNConfig):
             '''Negative LogLiklihood
             - log(1/sqrt(2*pi)e-(y-mu)^2/2/sigma^2)
             = + 1/2*(log(2*pi)+ (y-mu)^2/2/sigma^2)
+            Args :
+                y - [batch_size x seq_length, 2*chunk_samples]
+                mu - [batch_size x seq_length, chunk_samples]
+                sigma - [batch_size x seq_length, chunk_samples]
+            return
+                NLL
             '''
             with tf.variable_scope('NLL'):
                 sigma_square = tf.maximum(1e-10, tf.square(sigma)) # sigma^2, avoid to be zero
@@ -52,7 +57,7 @@ class VRNN(VRNNConfig):
         logger.info("Building VRNNCell starts...")
         self.cell = VRNNCell(self.chunk_samples, self.rnn_size, self.latent_size)
         logger.info("Building VRNNCell done.")
-        
+
         # [batch_size, seq_length, chunk_samples*2]
         self.input_data = tf.placeholder(dtype=tf.float32, shape=[self.batch_size, self.seq_length, 2*self.chunk_samples], name='input_data')
         # [batch_size, seq_length, chunk_samples*2]
@@ -69,29 +74,27 @@ class VRNN(VRNNConfig):
         self.target = tf.reshape(self.target_data, [-1, 2*self.chunk_samples])
 
         outputs, last_state = tf.contrib.rnn.static_rnn(self.cell, inputs, initial_state=(self.initial_state_c, self.initial_state_h))
-
+        # outputs seq_length*tuple*[batch_size, chunk_samples]
         outputs_reshape = []
         names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "prior_mu", "prior_sigma"]
-        for n,name in enumerate(names):
+
+        for n, name in enumerate(names):
             with tf.variable_scope(name):
-                x = tf.stack([o[n] for o in outputs])
-                x = tf.transpose(x,[1,0,2])
-                x = tf.reshape(x,[self.batch_size*self.seq_length, -1])
+                x = tf.stack([o[n] for o in outputs]) # [seq_length, batch_size, chunk_samples]
+                x = tf.transpose(x,[1,0,2]) # [batch_size, seq_length, chunk_samples]
+                x = tf.reshape(x, [self.batch_size*self.seq_length, -1]) # [batch_size x seq_length, chunk_samples]
                 outputs_reshape.append(x)
-
+        # tuple*[batch_size x seq_length, chunk_samples]
         enc_mu, enc_sigma, dec_mu, dec_sigma, prior_mu, prior_sigma = outputs_reshape
-        self.final_state_c,self.final_state_h = last_state
         self.mu = dec_mu
         self.sigma = dec_sigma
 
+        self.final_state_c, self.final_state_h = last_state
         self.cost = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, prior_mu, prior_sigma, self.target)
-        self.sigma = dec_sigma
-        self.mu = dec_mu
 
         print_vars("trainable_variables")
         self.lr = tf.Variable(self.lr, trainable = False)
         self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
-        
         logger.info("Building model done.")
 
         self.sess = tf.Session()
@@ -116,7 +119,6 @@ class VRNN(VRNNConfig):
         mixed_noise = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.01
 
         x = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1 + mixed_noise + np.sin(2 * np.pi * (np.arange(self.seq_length)[np.newaxis, :, np.newaxis] / 10. + t_offset))
-
         y = np.random.randn(self.batch_size, self.seq_length, (2 * self.chunk_samples)) * 0.1 + mixed_noise + np.sin(2 * np.pi * (np.arange(1, self.seq_length+1)[np.newaxis, :, np.newaxis] / 10. + t_offset))
 
         y[:, :, self.chunk_samples:] = 0.
@@ -130,17 +132,17 @@ class VRNN(VRNNConfig):
     def restore(self):
         saver = tf.train.Saver(tf.global_variables())
         ckpt = tf.train.get_checkpoint_state(SAVE_DIR)
-        print("loading model: ", ckpt.model_checkpoint_path)
+        print("Load the model from {}".format(ckpt.model_checkpoint_path))
         saver.restore(self.sess, ckpt.model_checkpoint_path)
 
     def train(self):
-        self.n_batches = 100
+        create_dir(SAVE_DIR)
         ckpt = tf.train.get_checkpoint_state(SAVE_DIR)
         saver = tf.train.Saver(tf.global_variables())
 
         if ckpt:
             saver.restore(self.sess, ckpt.model_checkpoint_path)
-            print("Loaded model")
+            print("Load the model from %s"%ckpt.model_checkpoint_path)
 
         iteration = 0
         for epoch in range(self.num_epochs):
@@ -153,17 +155,33 @@ class VRNN(VRNNConfig):
                 train_loss, _, sigma= self.sess.run([self.cost, self.train_op, self.sigma], feed_dict = feed_dict)
 
                 iteration+=1
-                print("{}/{}(epoch {}), train_loss = {:.6f}, std = {:.3f}".format(iteration, self.num_epochs * self.n_batches, epoch, self.chunk_samples * train_loss, sigma.mean(axis=0).mean(axis=0)))
-                
-                if iteration % self.save_every == 0 and iteration > 0:
-                    checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                if iteration % self.log_every == 0 and iteration > 0:
+                    print("{}/{}(epoch {}), train_loss = {:.6f}, std = {:.3f}".format(iteration, self.num_epochs * self.n_batches, epoch+1, self.chunk_samples * train_loss, sigma.mean(axis=0).mean(axis=0)))
+                    checkpoint_path = os.path.join(SAVE_DIR, 'model.ckpt')
                     saver.save(self.sess, checkpoint_path, global_step=iteration)
                     logger.info("model saved to {}".format(checkpoint_path))
 
 
     def sample(self, num=4410, start=None):
+        '''
+        Args :
+            num - int
+                4410
+            start - sequence
+                None => generate [1, 1, 2*self.chunk_samples]
+                start.shape==1 => generate [1, 1, 2*self.chunk_samples]
+                start.shape==2 [seq, 2*self.chunk_samples]
+                => generate(
+        Return :
+            chunks -
+            mus -
+            sigmas -
+        '''
         def sample_gaussian(mu, sigma):
             return mu + (sigma*np.random.randn(*sigma.shape))
+
+        # Initial condition
+        prev_state = self.sess.run(self.cell.zero_state(1, tf.float32)) # [batch_size, rnn_size]
 
         if start is None:
             prev_x = np.random.randn(1, 1, 2*self.chunk_samples)
@@ -171,49 +189,61 @@ class VRNN(VRNNConfig):
             prev_x = start[np.newaxis,np.newaxis,:]
         elif len(start.shape) == 2:
             for i in range(start.shape[0]-1):
-                prev_x = start[i,:]
-                prev_x = prev_x[np.newaxis,np.newaxis,:]
-                feed_dict = {self.input_data: prev_x,
-                        self.initial_state_c:prev_state[0],
-                        self.initial_state_h:prev_state[1]}
+                prev_x = start[i,:] # [2*self.chunk_samples]
+                prev_x = prev_x[np.newaxis,np.newaxis,:] #[1, 1, 2*self.chunk_samples]
 
-                [o_mu, o_sigma, o_rho, prev_state_c, prev_state_h] = self.sess.run(
-                        [self.mu, self.sigma, self.rho,self.final_state_c,self.final_state_h],
-                        feed_dict=feed_dict)
+                feed_dict = {
+                            self.input_data : prev_x,
+                            self.initial_state_c : prev_state[0],
+                            self.initial_state_h : prev_state[1]
+                            }
 
-            prev_x = start[-1,:]
-            prev_x = prev_x[np.newaxis,np.newaxis,:]
+                [prev_state_c, prev_state_h] = self.sess.run(
+                                                             [self.mu, self.sigma, self.final_state_c, self.final_state_h],
+                                                             feed_dict=feed_dict
+                                                            )
+                prev_state = prev_state_c, prev_state_h
 
-        prev_state = sess.run(self.cell.zero_state(1, tf.float32))
+            prev_x = start[-1,:] # [2*self.chunk_samples]
+            prev_x = prev_x[np.newaxis,np.newaxis,:] # [1,1,2*self.chunk_samples]
+
         chunks = np.zeros((num, 2*self.chunk_samples), dtype=np.float32)
         mus = np.zeros((num, self.chunk_samples), dtype=np.float32)
         sigmas = np.zeros((num, self.chunk_samples), dtype=np.float32)
 
         for i in range(num):
-            feed_dict = {self.input_data: prev_x,
-                    self.initial_state_c:prev_state[0],
-                    self.initial_state_h:prev_state[1]}
-            [o_mu, o_sigma, next_state_c, next_state_h] = self.sess.run(
-                [self.mu, self.sigma, self.final_state_c, self.final_state_h],
-                feed_dict = feed_dict)
+            feed_dict = {
+                         self.input_data : prev_x,
+                         self.initial_state_c : prev_state[0],
+                         self.initial_state_h : prev_state[1]
+                        }
 
-            next_x = np.hstack((sample_gaussian(o_mu, o_sigma),
-                                2.*(o_rho > np.random.random(o_rho.shape[:2]))-1.))
+            [o_mu, o_sigma, next_state_c, next_state_h] = self.sess.run(
+                                                                        [self.mu, self.sigma, self.final_state_c, self.final_state_h],
+                                                                        feed_dict = feed_dict
+                                                                       )
+            next_x = np.hstack(
+                                (
+                                    sample_gaussian(o_mu, o_sigma), np.zeros((1, self.chunk_samples))
+                                )
+                              ) # [1, 2*self.chunk_samples]
             chunks[i] = next_x
             mus[i] = o_mu
             sigmas[i] = o_sigma
 
             prev_x = np.zeros((1, 1, 2*self.chunk_samples), dtype=np.float32)
-            prev_x[0][0] = next_x
+            prev_x[0] = next_x
             prev_state = next_state_c, next_state_h
 
         return chunks, mus, sigmas
-
 
 if __name__ == '__main__':
     model = VRNN()
     model.initialize()
     model.train()
-    #model = VRNN(True)
-    #model.restore()
-    #sample_data,mus,sigmas = model.sample()
+    '''
+    Test code
+    model2 = VRNN(True)
+    model2.restore()
+    print(model2.sample())
+    '''
