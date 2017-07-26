@@ -25,6 +25,6 @@ python main.py
 ## config.py
 * Basic configuration of model
 * Every configuration can be changed here.
-![VRNN Structure](graph1.png?raw=true "VRNN Structure")
 
+![VRNN Structure](graph1.png?raw=true "VRNN Structure")
 ![Global Structure](graph2.png?raw=true "Global Structure")
