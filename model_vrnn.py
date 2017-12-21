@@ -157,7 +157,7 @@ class VRNN():
         self.sigma = dec_sigma
         self.rho = dec_rho
 
-        lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
+        lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma, flat_target_data)
         self.sigma = dec_sigma
         self.mu = dec_mu
         with tf.variable_scope('cost'):
